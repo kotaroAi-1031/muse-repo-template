@@ -5,6 +5,10 @@
  * - Repository: default branch is `main`; head branches are deleted
  *   automatically after a merge. Merge / squash / rebase strategies are
  *   left at GitHub defaults and are NOT managed here.
+ * - Security (security_and_analysis): Dependabot alerts, Dependabot
+ *   security updates (automated fix PRs) and private vulnerability
+ *   reporting are all enabled. Grouping of security-update PRs is not
+ *   a repository toggle; it follows the groups in .github/dependabot.yml.
  * - One branch ruleset named `baseline-protection` on the default branch:
  *     - blocks branch deletion            (rule type: `deletion`)
  *     - blocks force pushes               (rule type: `non_fast_forward`)
@@ -57,6 +61,21 @@ const desiredRepoSettings = {
   // allow_merge_commit / allow_squash_merge / allow_rebase_merge are
   // intentionally absent: they stay at GitHub defaults, unmanaged.
 } as const;
+
+// Dependabot / vulnerability settings. The current status is read from
+// the repository's `security_and_analysis` object; each feature is
+// enabled through its own idempotent PUT endpoint when missing.
+const desiredSecuritySettings = {
+  dependabot_alerts: "enabled", // PUT /vulnerability-alerts
+  dependabot_security_updates: "enabled", // PUT /automated-security-fixes
+  private_vulnerability_reporting: "enabled", // PUT /private-vulnerability-reporting
+} as const;
+
+const securityEndpoints: Record<keyof typeof desiredSecuritySettings, string> = {
+  dependabot_alerts: "vulnerability-alerts",
+  dependabot_security_updates: "automated-security-fixes",
+  private_vulnerability_reporting: "private-vulnerability-reporting",
+};
 
 // Each ruleset rule is a toggle so the ruleset can be extended later by
 // flipping a flag here (and re-running this program) once the owner has
@@ -194,6 +213,9 @@ async function gh<T>(
       `GitHub API ${method} ${apiPath} failed: ${res.status} ${await res.text()}`,
     );
   }
+  // Enable-style endpoints (vulnerability alerts, security fixes,
+  // private vulnerability reporting) answer 204 No Content.
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
@@ -204,6 +226,7 @@ async function gh<T>(
 interface ConvergeResult {
   repo: string;
   repoSettingsChanged: boolean;
+  securityChanged: string[];
   rulesetAction: "created" | "updated" | "unchanged";
   rulesetId: number;
 }
@@ -223,7 +246,21 @@ async function converge(owner: string, repo: string): Promise<ConvergeResult> {
     repoSettingsChanged = true;
   }
 
-  // 2. Baseline ruleset (find by name, create or update in place)
+  // 2. Dependabot / vulnerability settings (security_and_analysis)
+  const analysis = (current.security_and_analysis ?? {}) as Partial<
+    Record<keyof typeof desiredSecuritySettings, { status?: string }>
+  >;
+  const securityChanged: string[] = [];
+  for (const key of Object.keys(desiredSecuritySettings) as Array<
+    keyof typeof desiredSecuritySettings
+  >) {
+    if (analysis[key]?.status !== desiredSecuritySettings[key]) {
+      await gh("PUT", `${base}/${securityEndpoints[key]}`);
+      securityChanged.push(key);
+    }
+  }
+
+  // 3. Baseline ruleset (find by name, create or update in place)
   const existing = await gh<Array<{ id: number; name: string }>>(
     "GET",
     `${base}/rulesets`,
@@ -266,10 +303,10 @@ async function converge(owner: string, repo: string): Promise<ConvergeResult> {
     }
   }
 
-  // 3. Record last-applied state under .alchemy/ (Alchemy's local state
+  // 4. Record last-applied state under .alchemy/ (Alchemy's local state
   //    directory convention). Contains no credentials.
   const specHash = createHash("sha256")
-    .update(JSON.stringify({ desiredRepoSettings, desiredRuleset }))
+    .update(JSON.stringify({ desiredRepoSettings, desiredSecuritySettings, desiredRuleset }))
     .digest("hex");
   const stateDir = path.join(
     path.dirname(new URL(import.meta.url).pathname),
@@ -293,6 +330,7 @@ async function converge(owner: string, repo: string): Promise<ConvergeResult> {
         rulesetId,
         rulesetName: RULESET_NAME,
         repoSettingsChanged,
+        securityChanged,
         rulesetAction,
         previous,
         appliedAt: new Date().toISOString(),
@@ -302,7 +340,7 @@ async function converge(owner: string, repo: string): Promise<ConvergeResult> {
     ) + "\n",
   );
 
-  return { repo: `${owner}/${repo}`, repoSettingsChanged, rulesetAction, rulesetId };
+  return { repo: `${owner}/${repo}`, repoSettingsChanged, securityChanged, rulesetAction, rulesetId };
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +371,10 @@ const program = Effect.gen(function* () {
   console.log(
     `[github-baseline] ${result.repo}: repo settings ${
       result.repoSettingsChanged ? "updated" : "already matched"
+    }, security ${
+      result.securityChanged.length > 0
+        ? `enabled: ${result.securityChanged.join(", ")}`
+        : "already enabled"
     }, ruleset "${RULESET_NAME}" (id=${result.rulesetId}) ${result.rulesetAction}`,
   );
   return result;
