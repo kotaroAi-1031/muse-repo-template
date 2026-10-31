@@ -4,7 +4,10 @@
 #
 # Cadence: Dependabot's finest schedule interval is daily, so the
 # "every few days" feel is created with cooldown: versions younger
-# than 3 days are never proposed, and semver-major bumps wait 7 days.
+# than 3 days are never proposed, and semver-major bumps wait 7 days
+# where the ecosystem supports it (npm only — Dependabot rejects
+# semver-* cooldown options for github-actions, and one unsupported
+# property invalidates the whole file).
 #
 # Nix note: Dependabot has no Nix ecosystem. flake.lock updates are
 # handled by the scheduled update-flake-lock workflow instead
@@ -17,9 +20,11 @@ updates:
       interval: "daily"
       time: "09:00"
       timezone: "Asia/Tokyo"
+    # No semver-major-days here: Dependabot does not support semver-*
+    # cooldown options for github-actions, and the unsupported property
+    # invalidates the entire file.
     cooldown:
       default-days: 3
-      semver-major-days: 7
     groups:
       github-actions:
         patterns:
