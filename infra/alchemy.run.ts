@@ -62,9 +62,11 @@ const desiredRepoSettings = {
   // intentionally absent: they stay at GitHub defaults, unmanaged.
 } as const;
 
-// Dependabot / vulnerability settings. The current status is read from
-// the repository's `security_and_analysis` object; each feature is
-// enabled through its own idempotent PUT endpoint when missing.
+// Dependabot / vulnerability settings. Each feature's state is probed
+// through its own endpoint (the repository object's
+// security_and_analysis does not report dependabot_alerts or
+// private_vulnerability_reporting for these repositories) and enabled
+// through the matching idempotent PUT endpoint when missing.
 const desiredSecuritySettings = {
   dependabot_alerts: "enabled", // PUT /vulnerability-alerts
   dependabot_security_updates: "enabled", // PUT /automated-security-fixes
@@ -219,6 +221,20 @@ async function gh<T>(
   return (await res.json()) as T;
 }
 
+// Status-only probe for the enable-style endpoints: their GET answers
+// 200/204 when the feature is on and 404 when it is off.
+async function ghEnabled(apiPath: string): Promise<boolean> {
+  const res = await fetch(`https://api.github.com${apiPath}`, {
+    headers: {
+      Authorization: `Bearer ${token()}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "muse-repo-template-alchemy",
+    },
+  });
+  return res.status === 200 || res.status === 204;
+}
+
 // ---------------------------------------------------------------------------
 // Converge: make GitHub match the desired state, idempotently
 // ---------------------------------------------------------------------------
@@ -246,16 +262,16 @@ async function converge(owner: string, repo: string): Promise<ConvergeResult> {
     repoSettingsChanged = true;
   }
 
-  // 2. Dependabot / vulnerability settings (security_and_analysis)
-  const analysis = (current.security_and_analysis ?? {}) as Partial<
-    Record<keyof typeof desiredSecuritySettings, { status?: string }>
-  >;
+  // 2. Dependabot / vulnerability settings (probed per endpoint; see
+  //    the note on desiredSecuritySettings for why the repository
+  //    object's security_and_analysis is not used for this)
   const securityChanged: string[] = [];
   for (const key of Object.keys(desiredSecuritySettings) as Array<
     keyof typeof desiredSecuritySettings
   >) {
-    if (analysis[key]?.status !== desiredSecuritySettings[key]) {
-      await gh("PUT", `${base}/${securityEndpoints[key]}`);
+    const endpoint = securityEndpoints[key];
+    if (!(await ghEnabled(`${base}/${endpoint}`))) {
+      await gh("PUT", `${base}/${endpoint}`);
       securityChanged.push(key);
     }
   }
@@ -287,8 +303,33 @@ async function converge(owner: string, repo: string): Promise<ConvergeResult> {
       );
     const sortRules = (rules: unknown[]) =>
       [...rules].sort((a, b) => canonical(a).localeCompare(canonical(b)));
+    // GitHub echoes server-managed parameter defaults back (for
+    // example allowed_merge_methods on the pull_request rule) that
+    // this program does not send. Project the live rules onto the
+    // parameter keys the program manages before comparing, so the
+    // converge is a true no-op when the managed state already matches.
+    const desiredByType = new Map<string, { parameters?: Record<string, unknown> }>(
+      desiredRuleset.rules.map((r) => [
+        r.type,
+        r as { parameters?: Record<string, unknown> },
+      ]),
+    );
+    const projectRule = (rule: { type: string; parameters?: unknown }) => {
+      const desired = desiredByType.get(rule.type);
+      if (!rule.parameters || !desired?.parameters) return rule;
+      const keep = new Set(Object.keys(desired.parameters));
+      return {
+        ...rule,
+        parameters: Object.fromEntries(
+          Object.entries(rule.parameters as Record<string, unknown>).filter(
+            ([k]) => keep.has(k),
+          ),
+        ),
+      };
+    };
     const sameRules =
-      canonical(sortRules(detail.rules)) === canonical(sortRules([...desiredRuleset.rules]));
+      canonical(sortRules(detail.rules.map(projectRule))) ===
+      canonical(sortRules([...desiredRuleset.rules]));
     const sameSet = (a: string[] = [], b: readonly string[] = []) =>
       JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
     const detailConditions = detail.conditions as {
