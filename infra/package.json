@@ -1,1 +1,16 @@
-{"dependencies":{"@effect/platform-bun":"^4.0.5","alchemy":"2.0.0-beta.84","effect":"^4.0.5"},"description":"Alchemy v2 program that declaratively manages the baseline GitHub repository settings and branch ruleset for repositories created from muse-repo-template.","name":"muse-github-repo-baseline","private":true,"scripts":{"apply":"bun run alchemy.run.ts"},"type":"module","version":"1.0.0"}
+{
+  "name": "muse-github-repo-baseline",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Alchemy v2 program that declaratively manages the baseline GitHub repository settings and branch ruleset for repositories created from muse-repo-template.",
+  "packageManager": "pnpm@12.16.1",
+  "scripts": {
+    "apply": "node alchemy.run.ts"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "^4.0.5",
+    "alchemy": "2.0.0-beta.84",
+    "effect": "^4.0.5"
+  }
+}

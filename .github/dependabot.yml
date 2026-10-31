@@ -10,6 +10,21 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Asia/Tokyo"
+    cooldown:
+      default-days: 7
+
+  # Node dependencies are managed with pnpm. Dependabot tracks pnpm
+  # projects through the "npm" ecosystem; enable this for the Alchemy
+  # program in infra/ (and adjust the directory for other Node projects).
+  - package-ecosystem: "npm"
+    directory: "/infra"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    cooldown:
+      default-days: 7
 
   # --- Examples for other ecosystems (uncomment when the repo uses them) ---
   # - package-ecosystem: "npm"

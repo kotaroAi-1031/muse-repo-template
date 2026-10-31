@@ -49,6 +49,33 @@ const desiredRepoSettings = {
   // intentionally absent: they stay at GitHub defaults, unmanaged.
 } as const;
 
+// Each ruleset rule is a toggle so the ruleset can be extended later by
+// flipping a flag here (and re-running this program) once the owner has
+// reviewed the full list of available rules and decided. Until then ONLY
+// the two baseline rules are on: they prevent accidents (deleting the
+// default branch, rewriting its history) without taxing daily work.
+// Rules that need parameters (pull_request: required approvals etc.;
+// required_status_checks: which checks) cannot be expressed by a flag
+// alone — add their parameter objects to buildRulesetRules() when a
+// decision enables them.
+const RULESET_RULE_TOGGLES = {
+  deletion: true, // block deleting the default branch
+  non_fast_forward: true, // block force pushes to the default branch
+  creation: false, // (branch rulesets) restrict branch creation
+  update: false, // (branch rulesets) restrict branch updates
+  required_linear_history: false, // require linear history (no merge commits)
+  lock_branch: false, // make the branch read-only
+  pull_request: false, // require a pull request (and reviews) before merging
+  required_status_checks: false, // require CI checks to pass before merging
+} as const;
+
+type SimpleRuleType = keyof typeof RULESET_RULE_TOGGLES;
+
+const buildRulesetRules = (): Array<{ type: SimpleRuleType }> =>
+  (Object.entries(RULESET_RULE_TOGGLES) as Array<[SimpleRuleType, boolean]>)
+    .filter(([, enabled]) => enabled)
+    .map(([type]) => ({ type }));
+
 const desiredRuleset = {
   name: RULESET_NAME,
   target: "branch",
@@ -59,9 +86,9 @@ const desiredRuleset = {
       exclude: [] as string[],
     },
   },
-  rules: [{ type: "deletion" }, { type: "non_fast_forward" }],
+  rules: buildRulesetRules(),
   bypass_actors: [] as unknown[],
-} as const;
+};
 
 // ---------------------------------------------------------------------------
 // GitHub REST client (token only from the environment, never persisted)

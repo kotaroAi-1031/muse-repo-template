@@ -12,12 +12,14 @@ without being hard to operate:
 - **Hardened CI lint** (`.github/workflows/ci-lint.yml`) — read-only
   top-level permissions, every action pinned to a full commit SHA,
   every tool binary pinned and SHA-256-verified, running:
-  - **actionlint** with its shellcheck and pyflakes integrations
-    (every check it offers, nothing disabled),
-  - **sisakulint** (GitHub Actions SAST) with all rules enabled,
-    including the opt-in `missing-timeout-minutes`; the single
-    exception is `deprecated-commands`, which duplicates actionlint's
-    workflow-commands check (documented in the workflow),
+  - **jactionlint** (the actionlint fork that also carries
+    zizmor-style security rules) at its strictest profile
+    (`pedantic`, `--strict-exit`, offline), with its shellcheck and
+    pyflakes integrations — every rule on,
+  - **sisakulint** (GitHub Actions SAST) with every rule enabled
+    except the ones that duplicate a jactionlint rule (each exception
+    is documented in the workflow, with the jactionlint rule that
+    covers it); its taint-propagation rules stay on,
   - a **Betterleaks** scan of the git history.
 - **GitHub settings as code** — repository settings and one baseline
   branch ruleset are managed declaratively by the Alchemy v2 program
@@ -42,9 +44,9 @@ Then apply the GitHub baseline settings to the new repository:
 
 ```sh
 cd infra
-bun install
+pnpm install
 export GITHUB_TOKEN="$(gh auth token)"
-GITHUB_REPO="kotaroAi-1031/<new-repo>" bun run apply
+GITHUB_REPO="kotaroAi-1031/<new-repo>" pnpm run apply
 ```
 
 ## Standing rules
@@ -54,7 +56,7 @@ GITHUB_REPO="kotaroAi-1031/<new-repo>" bun run apply
   Secure Vault or a connector at runtime. Betterleaks guards commits
   and pushes; CI scans history again.
 - Hooks and tooling live in `~/workspace/tools/bin/` on the VM
-  (lefthook, betterleaks, actionlint, sisakulint); this template is
+  (lefthook, betterleaks, jactionlint, sisakulint); this template is
   the source of truth for how they are wired into a repository.
 - Keep the baseline loose. Extra rules (required reviews, status
   checks) are added per repository when they earn their keep — not

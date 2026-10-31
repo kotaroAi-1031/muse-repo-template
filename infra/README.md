@@ -16,7 +16,10 @@ created from this template.
   - blocks force pushes (`non_fast_forward` rule)
 
   No required reviews, no required status checks, no bypass actors.
-  Tighten it per-repository when a repo actually needs more.
+  Each rule is a toggle in `RULESET_RULE_TOGGLES` at the top of
+  `alchemy.run.ts` (all other available rules are present and off), so
+  extending the ruleset later is a flag flip plus a re-run — but only
+  after the owner has reviewed the full rule list and decided.
 
 ## How it works
 
@@ -31,20 +34,23 @@ is a no-op when GitHub already matches.
 
 ## Run it
 
-Requirements: [Bun](https://bun.sh), and the `gh` CLI signed in to an
-account that can administer the target repository.
+Requirements: Node.js 24+ with [pnpm](https://pnpm.io) (dependencies
+are managed with pnpm: `package.json` + `pnpm-lock.yaml`), and the
+`gh` CLI signed in to an account that can administer the target
+repository. The program itself is plain TypeScript run directly by
+Node (`node alchemy.run.ts`).
 
 ```sh
 cd infra
-bun install
+pnpm install
 
 # Token comes from gh at runtime; it is never written to a file.
 export GITHUB_TOKEN="$(gh auth token)"
 
 # Target repo: env var or --repo= argument
 export GITHUB_REPO="kotaroAi-1031/muse-repo-template"
-bun run apply
-# or: bun run alchemy.run.ts --repo=kotaroAi-1031/muse-tools
+pnpm run apply
+# or: node alchemy.run.ts --repo=kotaroAi-1031/muse-tools
 ```
 
 Verify afterwards:
