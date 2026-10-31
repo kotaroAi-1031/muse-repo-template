@@ -23,10 +23,11 @@ created from this template.
     **loose**: `strict_required_status_checks_policy: false`, so a PR
     need not be rebased onto the latest main before merging; flip
     `REQUIRED_STATUS_CHECKS_STRICT` in the program to change that)
-  - signed commits (`required_signatures`): implemented as a toggle,
-    currently **off** until the SSH signing key registration on the
-    GitHub account is verified (it needs the
-    `admin:ssh_signing_key` token scope).
+  - signed commits (`required_signatures`): **on**. The SSH signing
+    key (`~/.ssh/id_ed25519_signing.pub`) is registered on the GitHub
+    account as a signing key, git signs every commit locally, and
+    pushed commits verify on GitHub
+    (`commit.verification.verified=true`).
 
   There are deliberately **no bypass actors**: if the admin role could
   bypass, the working token could push straight to main and the rules
