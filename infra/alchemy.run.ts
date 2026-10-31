@@ -72,10 +72,11 @@ const RULESET_RULE_TOGGLES = {
   non_fast_forward: true, // block force pushes to the default branch
   pull_request: true, // no direct pushes to main: changes land via PRs
   required_status_checks: true, // the ci-lint jobs must pass before merging
-  // Flip to true only after the SSH signing key is registered on the
-  // GitHub account AND a pushed commit shows verification.verified=true
-  // (registration needs the admin:ssh_signing_key token scope).
-  required_signatures: false, // require signed commits
+  // Enabled: the SSH signing key (~/.ssh/id_ed25519_signing.pub) is
+  // registered on the GitHub account as a signing key, and pushed
+  // commits verify (commit.verification.verified=true, reason "valid";
+  // first confirmed on cc78ffb215c9cbd4bfacc7fd301306ec3cdaee5b).
+  required_signatures: true, // require signed commits
   creation: false, // (branch rulesets) restrict branch creation
   update: false, // (branch rulesets) restrict branch updates
   required_linear_history: false, // require linear history (no merge commits)
