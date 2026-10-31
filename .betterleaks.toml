@@ -1,0 +1,6 @@
+title = "Muse common betterleaks config"
+
+# Use the built-in default rule set as-is. Add repo-specific allowlists
+# below only for verified false positives, with a comment saying why.
+[extend]
+useDefault = true
