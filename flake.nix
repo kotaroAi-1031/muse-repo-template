@@ -115,10 +115,27 @@
           runHook postInstall
         '';
       };
+      # yt-dlp ships as a self-contained Linux binary; the pinned hash
+      # was verified against the publisher's SHA2-256SUMS and by hashing
+      # the downloaded artifact itself.
+      yt-dlp = pkgs.stdenvNoCC.mkDerivation {
+        pname = "yt-dlp";
+        version = "2026.10.26";
+        src = pkgs.fetchurl {
+          url = "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp_linux";
+          sha256 = "767ba9dce7052aa196f8b12652f433d76de128ba168966fa84b6394d5e6c6795";
+        };
+        dontUnpack = true;
+        installPhase = ''
+          runHook preInstall
+          install -Dm755 $src $out/bin/yt-dlp
+          runHook postInstall
+        '';
+      };
     in
     {
       packages.${system} = {
-        inherit gh pnpm jactionlint sisakulint betterleaks lefthook;
+        inherit gh pnpm jactionlint sisakulint betterleaks lefthook yt-dlp;
         # Re-exported from the locked nixpkgs so CI can pull exactly
         # these (and only these) per job via `nix shell`.
         nodejs_26 = pkgs.nodejs_26;
@@ -140,6 +157,7 @@
           sisakulint
           betterleaks
           lefthook
+          yt-dlp
           # jactionlint runs its pyflakes integration when pyflakes is on PATH.
           pkgs.python312Packages.pyflakes
         ];
