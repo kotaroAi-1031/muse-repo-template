@@ -1,0 +1,164 @@
+name: CI Lint
+
+# Hardened workflow linting:
+# - Top-level permissions are read-only; no job gets a write token.
+# - Every action is pinned to a full commit SHA (Dependabot keeps them current).
+# - Every downloaded tool binary is pinned to a version and verified by SHA-256.
+# - Tool install steps never use untrusted event data in `run:` scripts.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  jactionlint:
+    name: jactionlint (pedantic, all rules, with shellcheck and pyflakes)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        timeout-minutes: 5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # jactionlint is a fork of actionlint that covers all of actionlint's
+      # checks plus zizmor-style security rules. It enables its shellcheck
+      # and pyflakes integrations automatically when those binaries are on
+      # PATH, so install all three. CI runs the strictest profile
+      # (pedantic) with --strict-exit, offline (no --online checks).
+      - name: Install jactionlint, shellcheck and pyflakes (pinned, checksum-verified)
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/lint-bin"
+          curl -sSfL -o "$RUNNER_TEMP/jactionlint.tar.gz" "https://github.com/jdx/jactionlint/releases/download/v2.4.0/jactionlint_2.4.0_linux_amd64.tar.gz"
+          echo "26ddba81db28fffc51163175c070ee1a9d1150260de4b5232f01d9b749f32d8e  $RUNNER_TEMP/jactionlint.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/jactionlint.tar.gz" -C "$RUNNER_TEMP/lint-bin" jactionlint
+          curl -sSfL -o "$RUNNER_TEMP/shellcheck.tar.xz" "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz"
+          echo "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  $RUNNER_TEMP/shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP/lint-bin" --strip-components=1 "shellcheck-v0.11.0/shellcheck"
+          echo "$RUNNER_TEMP/lint-bin" >> "$GITHUB_PATH"
+          curl -sSfL -o "$RUNNER_TEMP/pyflakes.whl" "https://files.pythonhosted.org/packages/c2/2f/81d580a0fb83baeb066698975cb14a618bdbed7720678566f1b046a95fe8/pyflakes-3.4.0-py2.py3-none-any.whl"
+          echo "f742a7dbd0d9cb9ea41e9a24a918996e8170c799fa528688d40dd582c8265f4f  $RUNNER_TEMP/pyflakes.whl" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/pylibs"
+          python3 -m zipfile -e "$RUNNER_TEMP/pyflakes.whl" "$RUNNER_TEMP/pylibs"
+          printf '%s\n' '#!/usr/bin/env bash' "PYTHONPATH=\"$RUNNER_TEMP/pylibs\" exec python3 -m pyflakes \"\$@\"" > "$RUNNER_TEMP/lint-bin/pyflakes"
+          chmod +x "$RUNNER_TEMP/lint-bin/pyflakes"
+
+      - name: Run jactionlint (strictest profile, all rules, offline)
+        timeout-minutes: 5
+        run: jactionlint --profile pedantic --strict-exit --verbose
+
+  sisakulint:
+    name: sisakulint (GitHub Actions SAST, non-duplicate rules)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        timeout-minutes: 5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install sisakulint (pinned, checksum-verified)
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/lint-bin"
+          curl -sSfL -o "$RUNNER_TEMP/sisakulint.tar.gz" "https://github.com/sisaku-security/sisakulint/releases/download/v0.3.8/sisakulint_0.3.8_linux_amd64.tar.gz"
+          echo "6da250932db1cc6fae8b8f44185acacb6e6ffc16dbafb90b1a37a25ad3ad21df  $RUNNER_TEMP/sisakulint.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/sisakulint.tar.gz" -C "$RUNNER_TEMP/lint-bin" sisakulint
+          echo "$RUNNER_TEMP/lint-bin" >> "$GITHUB_PATH"
+
+      # sisakulint runs with every rule enabled EXCEPT the ones that
+      # duplicate a jactionlint rule (jactionlint runs in the job above
+      # at the pedantic profile, offline). Each ignored rule below is
+      # listed with the jactionlint rule that covers it:
+      #   commit-sha                     -> unpinned-uses
+      #   unpinned-images                -> unpinned-images / unpinned-uses
+      #   permissions                    -> excessive-permissions,
+      #                                     missing-permissions,
+      #                                     invalid-permissions
+      #   artipacked                     -> artipacked
+      #   cache-poisoning                -> cache-poisoning
+      #   cache-poisoning-poisonable-step -> cache-poisoning (pedantic)
+      #   dangerous-triggers-critical    -> dangerous-triggers
+      #   dangerous-triggers-medium      -> dangerous-triggers
+      #   deprecated-commands            -> deprecated-commands
+      #   deprecated-node-runtime        -> deprecated-node-runtime
+      #   bot-conditions                 -> bot-conditions
+      #   argument-injection             -> argument-injection
+      #   untrusted-checkout             -> untrusted-checkout
+      #   timeout-minutes                -> missing-timeout (job level;
+      #                                     the step-level opt-in
+      #                                     missing-timeout-minutes has no
+      #                                     jactionlint equivalent and
+      #                                     stays enabled below)
+      #   dependabot-github-actions      -> dependabot-missing-actions-update
+      #   secrets-inherit                -> secrets-inherit
+      #   unsound-contains               -> unsound-contains
+      #   self-hosted-runners            -> self-hosted-runner
+      #   output-clobbering              -> output-clobbering
+      #   needs                          -> duplicate-job-needs,
+      #                                     undefined-job-needs,
+      #                                     cyclic-job-needs
+      #   id                             -> invalid-id
+      #   environment-variable           -> invalid-env-var-name
+      #   conditional                    -> if-always-true
+      #   workflow-call                  -> invalid-workflow-call and the
+      #                                     other workflow-call checks
+      #   expression                     -> expression-syntax,
+      #                                     expression-type
+      # Everything else sisakulint offers stays ON, in particular its
+      # taint-propagation / dataflow rules (code-injection-*,
+      # envvar-injection-*, envpath-injection-*, reusable-workflow-taint,
+      # secret-exfiltration, untrusted-checkout-toctou-*) and the rules
+      # whose jactionlint counterparts only run with --online, which CI
+      # does not use (impostor-commit, archived-uses,
+      # known-vulnerable-actions, ref-confusion).
+      - name: Run sisakulint
+        timeout-minutes: 5
+        run: >-
+          sisakulint -enable-rule missing-timeout-minutes
+          -ignore "^(commit-sha|unpinned-images|permissions|artipacked|cache-poisoning|cache-poisoning-poisonable-step|dangerous-triggers-critical|dangerous-triggers-medium|deprecated-commands|deprecated-node-runtime|bot-conditions|argument-injection|untrusted-checkout|timeout-minutes|dependabot-github-actions|secrets-inherit|unsound-contains|self-hosted-runners|output-clobbering)$"
+          -ignore "^(needs|id|environment-variable|conditional|workflow-call|expression)$"
+
+  betterleaks:
+    name: betterleaks (secret scan)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        timeout-minutes: 5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install betterleaks (pinned, checksum-verified)
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/lint-bin"
+          curl -sSfL -o "$RUNNER_TEMP/betterleaks.tar.gz" "https://github.com/betterleaks/betterleaks/releases/download/v1.9.0/betterleaks_1.9.0_linux_x64.tar.gz"
+          echo "f8b185a39ffcece2a1ca82bf3a4e7435cd81963ffd16b7a9128daf75f35f6de7  $RUNNER_TEMP/betterleaks.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/betterleaks.tar.gz" -C "$RUNNER_TEMP/lint-bin" betterleaks
+          echo "$RUNNER_TEMP/lint-bin" >> "$GITHUB_PATH"
+
+      - name: Scan git history for secrets
+        timeout-minutes: 10
+        run: betterleaks git --redact --verbose .

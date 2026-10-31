@@ -5,11 +5,20 @@
  * - Repository: default branch is `main`; head branches are deleted
  *   automatically after a merge. Merge / squash / rebase strategies are
  *   left at GitHub defaults and are NOT managed here.
- * - One branch ruleset named `baseline-protection` on the default branch
- *   that only:
+ * - One branch ruleset named `baseline-protection` on the default branch:
  *     - blocks branch deletion            (rule type: `deletion`)
  *     - blocks force pushes               (rule type: `non_fast_forward`)
- *   No required reviews, no required status checks, no bypass actors.
+ *     - requires a pull request to merge  (rule type: `pull_request`,
+ *       0 required approvals — see PULL_REQUEST_PARAMETERS below)
+ *     - requires the ci-lint jobs to pass (rule type:
+ *       `required_status_checks`, loose / not strict)
+ *     - signed commits (rule type: `required_signatures`) are staged
+ *       behind a toggle below, off until the signing key registration
+ *       is verified on GitHub.
+ *   No bypass actors on purpose: with an admin bypass, the working
+ *   token could push straight to main and the rules would be theatre.
+ *   The owner can always edit or disable the ruleset itself, so nobody
+ *   is locked out in an emergency.
  *
  * How this is implemented (read before changing):
  * Alchemy v2 (alchemy@2.0.0-beta.84) ships providers for AWS, Cloudflare
@@ -61,20 +70,79 @@ const desiredRepoSettings = {
 const RULESET_RULE_TOGGLES = {
   deletion: true, // block deleting the default branch
   non_fast_forward: true, // block force pushes to the default branch
+  pull_request: true, // no direct pushes to main: changes land via PRs
+  required_status_checks: true, // the ci-lint jobs must pass before merging
+  // Flip to true only after the SSH signing key is registered on the
+  // GitHub account AND a pushed commit shows verification.verified=true
+  // (registration needs the admin:ssh_signing_key token scope).
+  required_signatures: false, // require signed commits
   creation: false, // (branch rulesets) restrict branch creation
   update: false, // (branch rulesets) restrict branch updates
   required_linear_history: false, // require linear history (no merge commits)
   lock_branch: false, // make the branch read-only
-  pull_request: false, // require a pull request (and reviews) before merging
-  required_status_checks: false, // require CI checks to pass before merging
 } as const;
 
-type SimpleRuleType = keyof typeof RULESET_RULE_TOGGLES;
+// pull_request parameters: 0 required approvals on purpose. The only
+// human who could approve is the owner, and the working account cannot
+// approve its own PRs, so requiring approvals would deadlock. The PR
+// exists as the change record and as the CI gate.
+const PULL_REQUEST_PARAMETERS = {
+  dismiss_stale_reviews_on_push: false,
+  require_code_owner_review: false,
+  require_last_push_approval: false,
+  required_approving_review_count: 0,
+  required_review_thread_resolution: false,
+} as const;
 
-const buildRulesetRules = (): Array<{ type: SimpleRuleType }> =>
-  (Object.entries(RULESET_RULE_TOGGLES) as Array<[SimpleRuleType, boolean]>)
-    .filter(([, enabled]) => enabled)
-    .map(([type]) => ({ type }));
+// required_status_checks parameters: loose, not strict — a PR does NOT
+// have to be up to date with main before merging (strict would force a
+// rebase + CI re-run for every stacked change and makes operation
+// heavy). Flip REQUIRED_STATUS_CHECKS_STRICT to true to change that.
+// Contexts are the ci-lint job display names; renaming a job in
+// .github/workflows/ci-lint.yml means updating this list too.
+const REQUIRED_STATUS_CHECKS_STRICT = false;
+const REQUIRED_STATUS_CHECK_CONTEXTS = [
+  "jactionlint (pedantic, all rules, with shellcheck and pyflakes)",
+  "sisakulint (GitHub Actions SAST, non-duplicate rules)",
+  "betterleaks (secret scan)",
+] as const;
+
+type RulesetRule =
+  | { type: "deletion" | "non_fast_forward" | "required_signatures" | "creation" | "update" | "required_linear_history" | "lock_branch" }
+  | { type: "pull_request"; parameters: typeof PULL_REQUEST_PARAMETERS }
+  | {
+      type: "required_status_checks";
+      parameters: {
+        strict_required_status_checks_policy: boolean;
+        do_not_enforce_on_create: boolean;
+        required_status_checks: Array<{ context: string }>;
+      };
+    };
+
+const buildRulesetRules = (): RulesetRule[] => {
+  const rules: RulesetRule[] = [];
+  if (RULESET_RULE_TOGGLES.deletion) rules.push({ type: "deletion" });
+  if (RULESET_RULE_TOGGLES.non_fast_forward) rules.push({ type: "non_fast_forward" });
+  if (RULESET_RULE_TOGGLES.pull_request) {
+    rules.push({ type: "pull_request", parameters: PULL_REQUEST_PARAMETERS });
+  }
+  if (RULESET_RULE_TOGGLES.required_status_checks) {
+    rules.push({
+      type: "required_status_checks",
+      parameters: {
+        strict_required_status_checks_policy: REQUIRED_STATUS_CHECKS_STRICT,
+        do_not_enforce_on_create: false,
+        required_status_checks: REQUIRED_STATUS_CHECK_CONTEXTS.map((context) => ({ context })),
+      },
+    });
+  }
+  if (RULESET_RULE_TOGGLES.required_signatures) rules.push({ type: "required_signatures" });
+  if (RULESET_RULE_TOGGLES.creation) rules.push({ type: "creation" });
+  if (RULESET_RULE_TOGGLES.update) rules.push({ type: "update" });
+  if (RULESET_RULE_TOGGLES.required_linear_history) rules.push({ type: "required_linear_history" });
+  if (RULESET_RULE_TOGGLES.lock_branch) rules.push({ type: "lock_branch" });
+  return rules;
+};
 
 const desiredRuleset = {
   name: RULESET_NAME,
@@ -171,11 +239,18 @@ async function converge(owner: string, repo: string): Promise<ConvergeResult> {
     const detail = await gh<{
       enforcement: string;
       conditions: unknown;
-      rules: Array<{ type: string }>;
+      rules: Array<{ type: string; parameters?: unknown }>;
     }>("GET", `${base}/rulesets/${found.id}`);
+    const canonical = (v: unknown): string =>
+      JSON.stringify(v, (_k, val) =>
+        val && typeof val === "object" && !Array.isArray(val)
+          ? Object.fromEntries(Object.entries(val as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
+          : val,
+      );
+    const sortRules = (rules: unknown[]) =>
+      [...rules].sort((a, b) => canonical(a).localeCompare(canonical(b)));
     const sameRules =
-      JSON.stringify(detail.rules.map((r) => r.type).sort()) ===
-      JSON.stringify(desiredRuleset.rules.map((r) => r.type).sort());
+      canonical(sortRules(detail.rules)) === canonical(sortRules([...desiredRuleset.rules]));
     const sameSet = (a: string[] = [], b: readonly string[] = []) =>
       JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
     const detailConditions = detail.conditions as {

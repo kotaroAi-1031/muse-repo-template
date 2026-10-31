@@ -11,15 +11,27 @@ created from this template.
   merge). Merge / squash / rebase strategies are left at GitHub
   defaults on purpose.
 - **One branch ruleset** named `baseline-protection` on the default
-  branch. It is deliberately *not* strict — it only:
-  - blocks branch deletion (`deletion` rule)
-  - blocks force pushes (`non_fast_forward` rule)
+  branch, with these rules (each is a toggle in
+  `RULESET_RULE_TOGGLES` at the top of `alchemy.run.ts`):
+  - blocks branch deletion (`deletion`)
+  - blocks force pushes (`non_fast_forward`)
+  - requires a pull request to merge (`pull_request`, **0 required
+    approvals**: the only possible approver is the owner and the
+    working account cannot approve its own PRs, so approvals would
+    deadlock; the PR is the change record and CI gate)
+  - requires the ci-lint jobs to pass (`required_status_checks`,
+    **loose**: `strict_required_status_checks_policy: false`, so a PR
+    need not be rebased onto the latest main before merging; flip
+    `REQUIRED_STATUS_CHECKS_STRICT` in the program to change that)
+  - signed commits (`required_signatures`): implemented as a toggle,
+    currently **off** until the SSH signing key registration on the
+    GitHub account is verified (it needs the
+    `admin:ssh_signing_key` token scope).
 
-  No required reviews, no required status checks, no bypass actors.
-  Each rule is a toggle in `RULESET_RULE_TOGGLES` at the top of
-  `alchemy.run.ts` (all other available rules are present and off), so
-  extending the ruleset later is a flag flip plus a re-run — but only
-  after the owner has reviewed the full rule list and decided.
+  There are deliberately **no bypass actors**: if the admin role could
+  bypass, the working token could push straight to main and the rules
+  would mean nothing. In an emergency the owner can edit or disable
+  the ruleset itself, so this cannot lock anyone out.
 
 ## How it works
 

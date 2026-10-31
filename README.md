@@ -24,8 +24,11 @@ without being hard to operate:
 - **GitHub settings as code** — repository settings and one baseline
   branch ruleset are managed declaratively by the Alchemy v2 program
   in `infra/` (see `infra/README.md`). The ruleset is deliberately
-  minimal: it only blocks force pushes and branch deletion on the
-  default branch. No required reviews, no required status checks.
+  for the default branch: it blocks force pushes and branch
+  deletion, requires changes to arrive via pull request (0 required
+  approvals — the PR is the record and the CI gate), and requires
+  the ci-lint jobs below to pass (loose, not strict). No bypass
+  actors. See `infra/README.md` for the reasoning.
 
 ## Create a repository from this template
 
@@ -50,6 +53,10 @@ GITHUB_REPO="kotaroAi-1031/<new-repo>" pnpm run apply
 ```
 
 ## Standing rules
+
+- **Never push directly to `main`.** Branch, open a pull request,
+  merge when ci-lint is green. Commits are signed with the working
+  account's SSH signing key.
 
 - **Never commit secrets** — no tokens, keys, credential files, or
   `.env` files, in any repository, ever. Credentials come from the
