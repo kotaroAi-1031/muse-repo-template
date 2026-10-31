@@ -10,6 +10,11 @@ created from this template.
   `delete_branch_on_merge` enabled (head branches are deleted after a
   merge). Merge / squash / rebase strategies are left at GitHub
   defaults on purpose.
+- **Security settings** (`security_and_analysis`): Dependabot alerts,
+  Dependabot security updates (automated fix PRs), and private
+  vulnerability reporting, all enabled. Grouping of security-update
+  PRs is not a repository setting; it follows the groups in
+  `.github/dependabot.yml`.
 - **One branch ruleset** named `baseline-protection` on the default
   branch, with these rules (each is a toggle in
   `RULESET_RULE_TOGGLES` at the top of `alchemy.run.ts`):
@@ -48,7 +53,8 @@ is a no-op when GitHub already matches.
 ## Run it
 
 Requirements: Node.js 24+ with [pnpm](https://pnpm.io) (dependencies
-are managed with pnpm: `package.json` + `pnpm-lock.yaml`), and the
+are managed with pnpm: `package.json` + `pnpm-lock.yaml`; the
+repository flake's devShell provides Node 26 and pnpm), and the
 `gh` CLI signed in to an account that can administer the target
 repository. The program itself is plain TypeScript run directly by
 Node (`node alchemy.run.ts`).

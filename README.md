@@ -6,12 +6,18 @@ without being hard to operate:
 
 - **Betterleaks via Lefthook** — commits and pushes are scanned for
   secrets locally, before anything reaches GitHub.
-- **Dependabot** — weekly update PRs for GitHub Actions (the only
-  ecosystem every repo here has); examples for other ecosystems are
-  commented into `.github/dependabot.yml`.
+- **Dependabot** — daily checks for GitHub Actions and npm (`infra/`),
+  with a 3-day cooldown (7 days for semver-major bumps) and each
+  ecosystem grouped into a single PR (see `.github/dependabot.yml`).
+- **Nix flake toolchain** (`flake.nix` + `flake.lock`) — the source of
+  truth for runtime and CLI tool versions (Node 26, Python 3.15, Go,
+  gh, pnpm, and the lint tools below). Enter it with `nix develop`;
+  CI pulls the same tools via `nix shell`. Dependabot has no Nix
+  ecosystem, so `flake.lock` itself is kept current by the scheduled
+  `update-flake-lock` workflow (roughly every 3 days).
 - **Hardened CI lint** (`.github/workflows/ci-lint.yml`) — read-only
   top-level permissions, every action pinned to a full commit SHA,
-  every tool binary pinned and SHA-256-verified, running:
+  tool versions and artifact hashes pinned by the flake, running:
   - **jactionlint** (the actionlint fork that also carries
     zizmor-style security rules) at its strictest profile
     (`pedantic`, `--strict-exit`, offline), with its shellcheck and
@@ -21,7 +27,9 @@ without being hard to operate:
     is documented in the workflow, with the jactionlint rule that
     covers it); its taint-propagation rules stay on,
   - a **Betterleaks** scan of the git history.
-- **GitHub settings as code** — repository settings and one baseline
+- **GitHub settings as code** — repository settings (including
+  Dependabot alerts, Dependabot security updates, and private
+  vulnerability reporting) and one baseline
   branch ruleset are managed declaratively by the Alchemy v2 program
   in `infra/` (see `infra/README.md`). The ruleset is deliberately
   for the default branch: it blocks force pushes and branch

@@ -1,52 +1,43 @@
-# Dependabot: keep GitHub Actions (and later, other dependencies) current.
-# Weekly is enough for these repositories; security updates still arrive
-# immediately through Dependabot alerts/security updates.
+# Dependabot: keep dependencies current, with every ecosystem grouped
+# into a single pull request so updates arrive as one reviewable change
+# per ecosystem instead of a stream of separate PRs.
+#
+# Cadence: Dependabot's finest schedule interval is daily, so the
+# "every few days" feel is created with cooldown: versions younger
+# than 3 days are never proposed, and semver-major bumps wait 7 days.
+#
+# Nix note: Dependabot has no Nix ecosystem. flake.lock updates are
+# handled by the scheduled update-flake-lock workflow instead
+# (.github/workflows/update-flake-lock.yml).
 version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
       time: "09:00"
       timezone: "Asia/Tokyo"
     cooldown:
-      default-days: 7
+      default-days: 3
+      semver-major-days: 7
+    groups:
+      github-actions:
+        patterns:
+          - "*"
 
   # Node dependencies are managed with pnpm. Dependabot tracks pnpm
-  # projects through the "npm" ecosystem; enable this for the Alchemy
-  # program in infra/ (and adjust the directory for other Node projects).
+  # projects through the "npm" ecosystem; this entry covers the Alchemy
+  # program in infra/ (and gets the same cooldown + grouping).
   - package-ecosystem: "npm"
     directory: "/infra"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
       time: "09:00"
       timezone: "Asia/Tokyo"
     cooldown:
-      default-days: 7
-
-  # --- Examples for other ecosystems (uncomment when the repo uses them) ---
-  # - package-ecosystem: "npm"
-  #   directory: "/"
-  #   schedule:
-  #     interval: "weekly"
-  #     day: "monday"
-  #     time: "09:00"
-  #     timezone: "Asia/Tokyo"
-  # - package-ecosystem: "pip"
-  #   directory: "/"
-  #   schedule:
-  #     interval: "weekly"
-  # - package-ecosystem: "docker"
-  #   directory: "/"
-  #   schedule:
-  #     interval: "weekly"
-  # - package-ecosystem: "cargo"
-  #   directory: "/"
-  #   schedule:
-  #     interval: "weekly"
-  # - package-ecosystem: "gomod"
-  #   directory: "/"
-  #   schedule:
-  #     interval: "weekly"
+      default-days: 3
+      semver-major-days: 7
+    groups:
+      npm:
+        patterns:
+          - "*"
