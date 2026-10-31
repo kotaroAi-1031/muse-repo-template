@@ -72,3 +72,19 @@ Verify afterwards:
 gh api repos/<owner>/<repo>/rulesets
 gh api repos/<owner>/<repo> --jq '{default_branch, delete_branch_on_merge}'
 ```
+
+## Typecheck
+
+```sh
+cd infra
+pnpm run typecheck
+```
+
+This runs **tsrs** (oxc-project/tsrs, the Rust port of the
+TypeScript 7 compiler; a checker only — the program still runs on
+Node) as `tsrs --noEmit --checkerAssignment go` against the
+hand-written `tsconfig.json`. tsrs is experimental (beta), so the
+CI typecheck job is not one of the ruleset's required status
+checks. `--checkerAssignment go` is the README-recommended
+workaround for the checker's diagnostic nondeterminism
+(tsrs issue #725).

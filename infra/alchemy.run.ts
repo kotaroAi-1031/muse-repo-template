@@ -323,7 +323,13 @@ function targetRepo(): { owner: string; repo: string } {
 
 const program = Effect.gen(function* () {
   const { owner, repo } = targetRepo();
-  const result = yield* Effect.tryPromise(() => converge(owner, repo));
+  // A failed converge dies as a defect (Effect.orDie): Alchemy.Stack
+  // requires the program's error channel to be ConfigError, and a
+  // GitHub API failure is not a configuration problem. The run still
+  // fails, with the original error as the defect cause.
+  const result = yield* Effect.tryPromise(() => converge(owner, repo)).pipe(
+    Effect.orDie,
+  );
   console.log(
     `[github-baseline] ${result.repo}: repo settings ${
       result.repoSettingsChanged ? "updated" : "already matched"

@@ -1,7 +1,9 @@
 name: CI Lint
 
 # Hardened workflow linting:
-# - Top-level permissions are read-only; no job gets a write token.
+# - Top-level permissions are empty ({}); every job declares exactly
+#   the permissions it needs (contents: read for all jobs here), and
+#   no job gets a write token.
 # - Every action is pinned to a full commit SHA (Dependabot keeps them current).
 # - Every downloaded tool binary is pinned to a version and verified by SHA-256.
 # - Tool install steps never use untrusted event data in `run:` scripts.
@@ -12,12 +14,14 @@ on:
       - main
   pull_request:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded runs for pull requests only; runs triggered by
+  # pushes to main always finish, so a merged change is never left
+  # half-checked.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
@@ -27,6 +31,8 @@ jobs:
   jactionlint:
     name: jactionlint (pedantic, all rules, with shellcheck and pyflakes)
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -66,6 +72,8 @@ jobs:
   sisakulint:
     name: sisakulint (GitHub Actions SAST, non-duplicate rules)
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -140,6 +148,8 @@ jobs:
   betterleaks:
     name: betterleaks (secret scan)
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -162,3 +172,37 @@ jobs:
       - name: Scan git history for secrets
         timeout-minutes: 10
         run: betterleaks git --redact --verbose .
+
+  typecheck:
+    name: typecheck (tsrs, experimental)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        timeout-minutes: 5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Typecheck the infra/ Alchemy program with tsrs, the Rust port
+      # of the TypeScript 7 compiler (a checker only; the program
+      # itself still runs on Node). tsrs is experimental (beta), so
+      # this job is intentionally NOT one of the ruleset's required
+      # status checks: it reports, it does not gate merges.
+      # pnpm comes from Corepack, at the version pinned by the
+      # "packageManager" field of infra/package.json (pnpm@12.16.1).
+      - name: Enable pnpm via Corepack
+        timeout-minutes: 5
+        run: corepack enable
+
+      - name: Install infra dependencies
+        timeout-minutes: 10
+        working-directory: infra
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck infra with tsrs
+        timeout-minutes: 5
+        working-directory: infra
+        run: pnpm run typecheck
