@@ -221,6 +221,20 @@ async function gh<T>(
   return (await res.json()) as T;
 }
 
+// Status-only probe for endpoints whose availability depends on the
+// repository's visibility and plan (rulesets on private repositories).
+async function ghStatus(apiPath: string): Promise<number> {
+  const res = await fetch(`https://api.github.com${apiPath}`, {
+    headers: {
+      Authorization: `Bearer ${token()}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "muse-repo-template-alchemy",
+    },
+  });
+  return res.status;
+}
+
 // Status-only probe for the enable-style endpoints: their GET answers
 // 200/204 when the feature is on and 404 when it is off.
 async function ghEnabled(apiPath: string): Promise<boolean> {
@@ -243,7 +257,8 @@ interface ConvergeResult {
   repo: string;
   repoSettingsChanged: boolean;
   securityChanged: string[];
-  rulesetAction: "created" | "updated" | "unchanged";
+  securitySkipped: string[];
+  rulesetAction: "created" | "updated" | "unchanged" | "skipped";
   rulesetId: number;
 }
 
@@ -266,9 +281,17 @@ async function converge(owner: string, repo: string): Promise<ConvergeResult> {
   //    the note on desiredSecuritySettings for why the repository
   //    object's security_and_analysis is not used for this)
   const securityChanged: string[] = [];
+  const securitySkipped: string[] = [];
   for (const key of Object.keys(desiredSecuritySettings) as Array<
     keyof typeof desiredSecuritySettings
   >) {
+    // Private vulnerability reporting exists only on public
+    // repositories (the endpoint 404s on private ones). Skip it there
+    // instead of failing the converge; it is recorded in the result.
+    if (key === "private_vulnerability_reporting" && current.private === true) {
+      securitySkipped.push(key);
+      continue;
+    }
     const endpoint = securityEndpoints[key];
     if (!(await ghEnabled(`${base}/${endpoint}`))) {
       await gh("PUT", `${base}/${endpoint}`);
@@ -276,15 +299,26 @@ async function converge(owner: string, repo: string): Promise<ConvergeResult> {
     }
   }
 
-  // 3. Baseline ruleset (find by name, create or update in place)
-  const existing = await gh<Array<{ id: number; name: string }>>(
-    "GET",
-    `${base}/rulesets`,
-  );
+  // 3. Baseline ruleset (find by name, create or update in place).
+  //    Repository rulesets are unavailable on private repositories
+  //    without GitHub Pro: the API answers 403 there. Detect that up
+  //    front and record the step as skipped (with a warning in the
+  //    run log) instead of failing the whole converge — the remaining
+  //    settings still apply, and a later run on a plan that offers
+  //    rulesets will create it then.
+  const rulesetsStatus = await ghStatus(`${base}/rulesets`);
+  const rulesetsAvailable = rulesetsStatus === 200;
+  const existing = rulesetsAvailable
+    ? await gh<Array<{ id: number; name: string }>>("GET", `${base}/rulesets`)
+    : [];
   const found = existing.find((r) => r.name === RULESET_NAME);
-  let rulesetAction: ConvergeResult["rulesetAction"] = "unchanged";
-  let rulesetId: number;
-  if (!found) {
+  let rulesetAction: ConvergeResult["rulesetAction"] = rulesetsAvailable
+    ? "unchanged"
+    : "skipped";
+  let rulesetId: number = 0;
+  if (!rulesetsAvailable) {
+    // rulesetId stays 0 and no create/update is attempted.
+  } else if (!found) {
     const created = await gh<{ id: number }>("POST", `${base}/rulesets`, desiredRuleset);
     rulesetId = created.id;
     rulesetAction = "created";
@@ -372,6 +406,7 @@ async function converge(owner: string, repo: string): Promise<ConvergeResult> {
         rulesetName: RULESET_NAME,
         repoSettingsChanged,
         securityChanged,
+        securitySkipped,
         rulesetAction,
         previous,
         appliedAt: new Date().toISOString(),
@@ -381,7 +416,14 @@ async function converge(owner: string, repo: string): Promise<ConvergeResult> {
     ) + "\n",
   );
 
-  return { repo: `${owner}/${repo}`, repoSettingsChanged, securityChanged, rulesetAction, rulesetId };
+  return {
+    repo: `${owner}/${repo}`,
+    repoSettingsChanged,
+    securityChanged,
+    securitySkipped,
+    rulesetAction,
+    rulesetId,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -418,6 +460,16 @@ const program = Effect.gen(function* () {
         : "already enabled"
     }, ruleset "${RULESET_NAME}" (id=${result.rulesetId}) ${result.rulesetAction}`,
   );
+  if (result.securitySkipped.length > 0) {
+    console.log(
+      `[github-baseline] skipped (unavailable on private repositories): ${result.securitySkipped.join(", ")}`,
+    );
+  }
+  if (result.rulesetAction === "skipped") {
+    console.log(
+      `[github-baseline] WARNING: rulesets are unavailable for this repository (private repository without GitHub Pro); the "no direct push to main" rule is NOT enforced by GitHub until the plan or visibility changes.`,
+    );
+  }
   return result;
 });
 
