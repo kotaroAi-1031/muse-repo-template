@@ -39,6 +39,20 @@ created from this template.
   would mean nothing. In an emergency the owner can edit or disable
   the ruleset itself, so this cannot lock anyone out.
 
+## Private repositories
+
+Two pieces of the baseline are unavailable on **private** repositories
+without GitHub Pro, and the program skips them with a warning instead
+of failing (the rest of the converge still applies):
+
+- **Branch rulesets**: the rulesets API answers 403 on private
+  repositories on the Free plan, so `baseline-protection` is not
+  created. The "no direct push to main" rule is then a convention,
+  not a GitHub-enforced control, until the plan or the repository
+  visibility changes (a later run creates the ruleset then).
+- **Private vulnerability reporting**: a public-repository feature;
+  the endpoint 404s on private repositories.
+
 ## How it works
 
 Alchemy v2 (`alchemy@2.0.0-beta.84`) has no built-in GitHub repository
